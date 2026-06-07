@@ -12,6 +12,7 @@ add_library(platform_Windows STATIC
   src/force_compose.c
   src/com_ref.c
   src/ods.c
+  src/helios_sink.c
 )
 
 # allow use of functions for Windows 7 or later
@@ -25,6 +26,7 @@ target_link_libraries(platform_Windows
   lg_common
   capture
 
+  setupapi
   userenv
   wtsapi32
   psapi
@@ -37,6 +39,7 @@ target_link_libraries(platform_Windows
 target_include_directories(platform_Windows
   PRIVATE
     src
+    "${PROJECT_TOP}/../icd/mesa/include"
 )
 
 # these are for the nsis installer generator

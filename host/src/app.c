@@ -20,6 +20,7 @@
 
 #include "interface/platform.h"
 #include "interface/capture.h"
+#include "helios_sink.h"
 #include "dynamic/capture.h"
 #include "common/version.h"
 #include "common/debug.h"
@@ -367,6 +368,7 @@ static bool sendFrame(CaptureResult result, bool * restart)
     app.captureIndex,
     app.frameBuffer[app.captureIndex],
     app.maxFrameSize);
+  helios_sink_present(&frame, app.frameBuffer[app.captureIndex]);
 
   app.readIndex = app.captureIndex;
   if (++app.captureIndex == LGMP_Q_FRAME_LEN)
@@ -826,6 +828,7 @@ int app_main(int argc, char * argv[])
   for(int i = 0; CaptureInterfaces[i]; ++i)
     if (CaptureInterfaces[i]->initOptions)
       CaptureInterfaces[i]->initOptions();
+  helios_sink_initOptions();
 
   option_register(options);
 
@@ -863,6 +866,8 @@ int app_main(int argc, char * argv[])
 
   // perform platform specific initialization
   if (!app_init())
+    return LG_HOST_EXIT_FATAL;
+  if (!helios_sink_init())
     return LG_HOST_EXIT_FATAL;
 
   DEBUG_INFO("Looking Glass Host (%s)", BUILD_VERSION);
@@ -1092,6 +1097,7 @@ fail:
   stopThreads();
   captureStop();
   app.iface->free();
+  helios_sink_deinit();
 
   LG_LOCK_FREE(app.pointerLock);
 
