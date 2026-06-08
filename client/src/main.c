@@ -378,11 +378,11 @@ int main_cursorThread(void * unused)
     break;
   }
 
-  while(g_state.state == APP_STATE_RUNNING && !g_state.stopVideo)
-  {
-    LGMPMessage msg;
-    if ((status = lgmpClientProcess(g_state.pointerQueue, &msg)) != LGMP_OK)
-    {
+	  while(g_state.state == APP_STATE_RUNNING && !g_state.stopVideo)
+	  {
+	    LGMPMessage msg;
+	    if ((status = lgmpClientProcess(g_state.pointerQueue, &msg)) != LGMP_OK)
+	    {
       if (status == LGMP_ERR_QUEUE_EMPTY)
       {
         if (g_cursor.redraw && g_cursor.guest.valid)
@@ -418,11 +418,46 @@ int main_cursorThread(void * unused)
         }
 
         continue;
-      }
+	      }
 
-      if (status == LGMP_ERR_INVALID_SESSION)
-        g_state.state = APP_STATE_RESTART;
-      else
+	      if (status == LGMP_ERR_QUEUE_TIMEOUT ||
+	          status == LGMP_ERR_QUEUE_UNSUBSCRIBED)
+	      {
+	        DEBUG_WARN("pointer queue lost: %s; resubscribing",
+	            lgmpStatusString(status));
+	        LG_LOCK(g_state.pointerQueueLock);
+	        lgmpClientUnsubscribe(&g_state.pointerQueue);
+	        LG_UNLOCK(g_state.pointerQueueLock);
+
+	        while(g_state.state == APP_STATE_RUNNING && !g_state.stopVideo)
+	        {
+	          status = lgmpClientSubscribe(g_state.lgmp, LGMP_Q_POINTER,
+	              &g_state.pointerQueue);
+	          if (status == LGMP_OK)
+	            break;
+	          if (status == LGMP_ERR_NO_SUCH_QUEUE ||
+	              status == LGMP_ERR_QUEUE_TIMEOUT ||
+	              status == LGMP_ERR_QUEUE_UNSUBSCRIBED)
+	          {
+	            usleep(1000);
+	            continue;
+	          }
+	          if (status == LGMP_ERR_INVALID_SESSION)
+	          {
+	            g_state.state = APP_STATE_RESTART;
+	            break;
+	          }
+	          DEBUG_ERROR("lgmpClientSubscribe Failed: %s",
+	              lgmpStatusString(status));
+	          g_state.state = APP_STATE_SHUTDOWN;
+	          break;
+	        }
+	        continue;
+	      }
+
+	      if (status == LGMP_ERR_INVALID_SESSION)
+	        g_state.state = APP_STATE_RESTART;
+	      else
       {
         DEBUG_ERROR("lgmpClientProcess Failed: %s", lgmpStatusString(status));
         g_state.state = APP_STATE_SHUTDOWN;
@@ -533,6 +568,38 @@ int main_cursorThread(void * unused)
   return 0;
 }
 
+static bool processHeliosFrame(PLGMPClientQueue queue, bool * valid)
+{
+  LGMP_STATUS status;
+  bool updated = false;
+  LGMPMessage msg;
+
+  status = lgmpClientProcess(queue, &msg);
+  if (status == LGMP_ERR_QUEUE_EMPTY)
+    return false;
+
+  if (status == LGMP_ERR_INVALID_SESSION ||
+      status == LGMP_ERR_QUEUE_UNSUBSCRIBED ||
+      status == LGMP_ERR_QUEUE_TIMEOUT)
+  {
+    *valid = false;
+    return false;
+  }
+
+  if (status != LGMP_OK)
+    return false;
+
+  KVMFRFrame * frame = (KVMFRFrame *)msg.mem;
+  FrameBuffer * fb = (FrameBuffer *)(((uint8_t*)frame) + frame->offset);
+
+  LG_LOCK(g_state.lgrLock);
+  updated = RENDERER(onHeliosFrame, frame, fb);
+  LG_UNLOCK(g_state.lgrLock);
+
+  lgmpClientMessageDone(queue);
+  return updated;
+}
+
 int main_frameThread(void * unused)
 {
   struct DMAFrameInfo
@@ -544,6 +611,7 @@ int main_frameThread(void * unused)
 
   LGMP_STATUS      status;
   PLGMPClientQueue queue;
+  PLGMPClientQueue heliosQueue = NULL;
 
   uint32_t          frameSerial = 0;
   uint32_t          formatVer   = 0;
@@ -576,8 +644,47 @@ int main_frameThread(void * unused)
     break;
   }
 
+  status = lgmpClientSubscribe(g_state.lgmp, LGMP_Q_HELIOS, &heliosQueue);
+  if (status == LGMP_OK)
+    DEBUG_INFO("Subscribed to Helios overlay queue");
+  else
+    heliosQueue = NULL;
+
   while(g_state.state == APP_STATE_RUNNING && !g_state.stopVideo)
   {
+    if (heliosQueue)
+    {
+      bool heliosValid = true;
+      if (processHeliosFrame(heliosQueue, &heliosValid))
+      {
+        if (g_state.jitRender)
+        {
+          if (atomic_load_explicit(&g_state.pendingCount, memory_order_acquire) < 10)
+            atomic_fetch_add_explicit(&g_state.pendingCount, 1,
+                memory_order_release);
+        }
+        else
+          lgSignalEvent(g_state.frameEvent);
+      }
+
+      if (!heliosValid)
+      {
+        lgmpClientUnsubscribe(&heliosQueue);
+        heliosQueue = NULL;
+      }
+    }
+
+    if (!heliosQueue)
+    {
+      status = lgmpClientSubscribe(g_state.lgmp, LGMP_Q_HELIOS, &heliosQueue);
+      if (status != LGMP_OK)
+      {
+        if (status != LGMP_ERR_NO_SUCH_QUEUE && status != LGMP_ERR_INVALID_SESSION)
+          DEBUG_WARN("lgmpClientSubscribe Failed (Helios): %s", lgmpStatusString(status));
+        heliosQueue = NULL;
+      }
+    }
+
     LGMPMessage msg;
     if ((status = lgmpClientProcess(queue, &msg)) != LGMP_OK)
     {
@@ -614,6 +721,15 @@ int main_frameThread(void * unused)
     }
 
     KVMFRFrame * frame = (KVMFRFrame *)msg.mem;
+    if (frame->type == FRAME_TYPE_INVALID || frame->type >= FRAME_TYPE_MAX)
+    {
+      DEBUG_WARN("Ignoring invalid desktop frame: type=%u rotation=%u "
+          "formatVer=%u serial=%u data=%ux%u pitch=%u offset=%u",
+          frame->type, frame->rotation, frame->formatVer, frame->frameSerial,
+          frame->dataWidth, frame->dataHeight, frame->pitch, frame->offset);
+      lgmpClientMessageDone(queue);
+      continue;
+    }
 
     // ignore any repeated frames, this happens when a new client connects to
     // the same host application.
@@ -842,6 +958,8 @@ int main_frameThread(void * unused)
     app_useSpiceDisplay(false);
   }
 
+  if (heliosQueue)
+    lgmpClientUnsubscribe(&heliosQueue);
   lgmpClientUnsubscribe(&queue);
 
   RENDERER(onRestart);

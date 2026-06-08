@@ -30,6 +30,7 @@
 #include <wrl.h>
 
 #include "CDebug.h"
+#include "CPipeServer.h"
 #include "CIndirectDeviceContext.h"
 #include "CIndirectMonitorContext.h"
 #include "CSettings.h"
@@ -255,6 +256,7 @@ NTSTATUS LGIddCreateDevice(_Inout_ PWDFDEVICE_INIT deviceInit)
   WDF_OBJECT_ATTRIBUTES_INIT_CONTEXT_TYPE(&deviceAttributes, CIndirectDeviceContextWrapper);
   deviceAttributes.EvtCleanupCallback = [](WDFOBJECT object)
   {
+    g_pipe.SetDeviceContext(nullptr);
     auto * wrapper = WdfObjectGet_CIndirectDeviceContextWrapper(object);
     if (wrapper)
       wrapper->Cleanup();
@@ -276,5 +278,6 @@ NTSTATUS LGIddCreateDevice(_Inout_ PWDFDEVICE_INIT deviceInit)
 
   auto wrapper = WdfObjectGet_CIndirectDeviceContextWrapper(device);
   wrapper->context = new CIndirectDeviceContext(device);
+  g_pipe.SetDeviceContext(wrapper->context);
   return status;
 }
