@@ -201,6 +201,9 @@ void CIndirectDeviceContext::InitAdapter()
 
   auto * wrapper = WdfObjectGet_CIndirectDeviceContextWrapper(m_adapter);
   wrapper->context = this;  
+
+  if (!m_heliosSink.Init())
+    DEBUG_WARN("Helios: IDD Vulkan sink disabled after initialization failure");
 }
 
 void CIndirectDeviceContext::FinishInit(UINT connectorIndex)
@@ -912,6 +915,19 @@ void CIndirectDeviceContext::FinalizeFrameBuffer(unsigned frameIndex) const
 {
   FrameBuffer * fb = m_frameBuffer[frameIndex];
   fb->wp = m_height * m_pitch;
+}
+
+void CIndirectDeviceContext::PresentHeliosFrame(unsigned frameIndex)
+{
+  if (frameIndex >= LGMP_Q_FRAME_LEN)
+    return;
+
+  KVMFRFrame * frame = m_frame[frameIndex];
+  FrameBuffer * fb = m_frameBuffer[frameIndex];
+  if (!frame || !fb)
+    return;
+
+  m_heliosSink.Present(frame, fb->data);
 }
 
 void CIndirectDeviceContext::SendCursor(const IDARG_OUT_QUERY_HWCURSOR& info, const BYTE * data)

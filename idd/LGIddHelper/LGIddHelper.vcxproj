@@ -227,7 +227,10 @@ copy /Y "$(ProjectDir)VERSION" "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" />
   <Target Name="GenerateVersionInfo" BeforeTargets="ClCompile">
-    <Exec Command="&quot;$(Git)&quot; describe --always --abbrev=10 --dirty=+ --tags" ConsoleToMSBuild="true">
+    <PropertyGroup>
+      <GitVersion>helios-dev</GitVersion>
+    </PropertyGroup>
+    <Exec Condition="Exists('$(SolutionDir)..\.git\HEAD')" Command="&quot;$(Git)&quot; describe --always --abbrev=10 --dirty=+ --tags" ConsoleToMSBuild="true">
       <Output TaskParameter="ConsoleOutput" PropertyName="GitVersion" />
     </Exec>
     <ItemGroup>
@@ -245,10 +248,4 @@ copy /Y "$(ProjectDir)VERSION" "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd
       $(BuildDependsOn);
     </BuildDependsOn>
   </PropertyGroup>
-  <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
-    <PropertyGroup>
-      <ErrorText>This project references NuGet package(s) that are missing on this computer. Use NuGet Package Restore to download them.  For more information, see http://go.microsoft.com/fwlink/?LinkID=322105. The missing file is {0}.</ErrorText>
-    </PropertyGroup>
-    <Error Condition="!Exists('..\packages\MSBuilder.Git.0.3.0\build\MSBuilder.Git.props')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\MSBuilder.Git.0.3.0\build\MSBuilder.Git.props'))" />
-  </Target>
 </Project>

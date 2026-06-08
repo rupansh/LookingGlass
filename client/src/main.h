@@ -176,6 +176,7 @@ struct AppParams
   int                  fpsMin;
   LG_RendererRotate    winRotate;
   bool                 useSpice;
+  bool                 useSpiceDisplay;
   bool                 useSpiceInput;
   bool                 useSpiceClipboard;
   bool                 useSpiceAudio;

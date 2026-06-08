@@ -28,6 +28,7 @@
 #include "CIVSHMEM.h"
 #include "CSettings.h"
 #include "CEdid.h"
+#include "CHeliosSink.h"
 #include "CPostProcessor.h"
 
 extern "C" {
@@ -57,6 +58,7 @@ private:
   bool          m_replugMonitor = false;
 
   CIVSHMEM m_ivshmem;
+  CHeliosSink m_heliosSink;
 
   PLGMPHost      m_lgmp       = nullptr;
   WDFTIMER       m_lgmpTimer  = nullptr;
@@ -110,7 +112,11 @@ public:
   CIndirectDeviceContext(_In_ WDFDEVICE wdfDevice) :
     m_wdfDevice(wdfDevice) {};
 
-  virtual ~CIndirectDeviceContext() { DeInitLGMP(); }
+  virtual ~CIndirectDeviceContext()
+  {
+    m_heliosSink.Deinit();
+    DeInitLGMP();
+  }
 
   bool SetupLGMP(size_t alignSize);
 
@@ -153,6 +159,7 @@ public:
   PreparedFrameBuffer PrepareFrameBuffer(unsigned pitch, const D12FrameFormat& srcFormat, const D12FrameFormat& dstFormat, const RECT * dirtyRects, unsigned nbDirtyRects);
   void WriteFrameBuffer(unsigned frameIndex, void* src, size_t offset, size_t len, bool setWritePos) const;
   void FinalizeFrameBuffer(unsigned frameIndex) const;
+  void PresentHeliosFrame(unsigned frameIndex);
 
   void SendCursor(const IDARG_OUT_QUERY_HWCURSOR & info, const BYTE * data);
 

@@ -1086,8 +1086,8 @@ void app_stopVideo(bool stop)
 bool app_useSpiceDisplay(bool enable)
 {
   static bool lastState = false;
-  if (!g_params.useSpice || lastState == enable)
-    return g_params.useSpice && lastState;
+  if (!g_params.useSpice || !g_params.useSpiceDisplay || lastState == enable)
+    return g_params.useSpice && g_params.useSpiceDisplay && lastState;
 
   // if spice is not yet ready, flag the state we want for when it is
   if (!g_state.spiceReady)

@@ -246,6 +246,8 @@ void CSwapChainProcessor::CompletionFunction(
       fbRes->GetMap(), 0, fbRes->GetFrameSize(), true);
   else
     sc->m_devContext->FinalizeFrameBuffer(fbRes->GetFrameIndex());
+
+  sc->m_devContext->PresentHeliosFrame(fbRes->GetFrameIndex());
 }
 
 

@@ -494,6 +494,13 @@ static struct Option options[] =
   },
   {
     .module         = "spice",
+    .name           = "display",
+    .description    = "Allow SPICE display fallback while waiting for the Looking Glass stream",
+    .type           = OPTION_TYPE_BOOL,
+    .value.x_bool   = false
+  },
+  {
+    .module         = "spice",
     .name           = "scaleCursor",
     .description    = "Scale cursor input position to screen size when up/down scaled",
     .shortopt       = 'j',
@@ -740,6 +747,7 @@ bool config_load(int argc, char * argv[])
     g_params.spiceHost         = option_get_string("spice", "host");
     g_params.spicePort         = option_get_int   ("spice", "port");
 
+    g_params.useSpiceDisplay   = option_get_bool("spice", "display"  );
     g_params.useSpiceInput     = option_get_bool("spice", "input"    );
     g_params.useSpiceClipboard = option_get_bool("spice", "clipboard");
     g_params.useSpiceAudio     = option_get_bool("spice", "audio"    );
