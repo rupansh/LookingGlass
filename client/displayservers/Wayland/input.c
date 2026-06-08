@@ -595,12 +595,15 @@ void waylandUngrabKeyboard(void)
 
 void waylandWarpPointer(int x, int y, bool exiting)
 {
-  if (!wlWm.pointerInSurface || wlWm.lockedPointer)
+  if (!wlWm.pointerInSurface || wlWm.lockedPointer ||
+      !wlWm.compositor || !wlWm.surface || !wlWm.pointerConstraints ||
+      !wlWm.pointer)
     return;
 
   INTERLOCKED_SECTION(wlWm.confineLock,
   {
-    if (wlWm.lockedPointer)
+    if (wlWm.lockedPointer || !wlWm.compositor || !wlWm.surface ||
+        !wlWm.pointerConstraints || !wlWm.pointer)
     {
       LG_UNLOCK(wlWm.confineLock);
       return;
@@ -615,12 +618,18 @@ void waylandWarpPointer(int x, int y, bool exiting)
     else if (y >= height) y = height - 1;
 
     struct wl_region * region = wl_compositor_create_region(wlWm.compositor);
+    if (!region)
+    {
+      DEBUG_WARN("failed to create Wayland pointer confinement region");
+      wlWm.warpSupport = false;
+      LG_UNLOCK(wlWm.confineLock);
+      return;
+    }
     wl_region_add(region, x, y, 1, 1);
 
     if (wlWm.confinedPointer)
     {
       zwp_confined_pointer_v1_set_region(wlWm.confinedPointer, region);
-      wl_surface_commit(wlWm.surface);
       zwp_confined_pointer_v1_set_region(wlWm.confinedPointer, NULL);
     }
     else
@@ -629,11 +638,9 @@ void waylandWarpPointer(int x, int y, bool exiting)
       confine = zwp_pointer_constraints_v1_confine_pointer(
             wlWm.pointerConstraints, wlWm.surface, wlWm.pointer, region,
             ZWP_POINTER_CONSTRAINTS_V1_LIFETIME_PERSISTENT);
-      wl_surface_commit(wlWm.surface);
       zwp_confined_pointer_v1_destroy(confine);
     }
 
-    wl_surface_commit(wlWm.surface);
     wl_region_destroy(region);
   });
 }
@@ -649,6 +656,9 @@ void waylandGuestPointerUpdated(double x, double y, double localX, double localY
   if ( !wlWm.pointer          ||
        !wlWm.warpSupport      ||
        !wlWm.pointerInSurface ||
+       !wlWm.compositor       ||
+       !wlWm.surface          ||
+       !wlWm.pointerConstraints ||
         wlWm.lockedPointer    )
     return;
 
