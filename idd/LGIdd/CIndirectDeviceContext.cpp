@@ -50,9 +50,11 @@ static const UINT IDDCX_VERSION_1_10 = 0x1A00;
 static inline IDDCX_WIRE_BITS_PER_COMPONENT GetWireBitsPerComponent(bool hdr)
 {
   IDDCX_WIRE_BITS_PER_COMPONENT bits = {};
-  bits.Rgb = IDDCX_BITS_PER_COMPONENT_8;
-  if (hdr)
-    bits.Rgb = (IDDCX_BITS_PER_COMPONENT)(bits.Rgb | IDDCX_BITS_PER_COMPONENT_10);
+  /* If IddCx 1.10 HDR/WCG support is available, prefer a 10 bpc scanout. The
+   * frame pipeline already handles DXGI_FORMAT_R10G10B10A2_UNORM as
+   * FRAME_TYPE_RGBA10, while advertising both 8 and 10 lets Windows pick 8 bpc.
+   */
+  bits.Rgb = hdr ? IDDCX_BITS_PER_COMPONENT_10 : IDDCX_BITS_PER_COMPONENT_8;
   bits.YCbCr444 = IDDCX_BITS_PER_COMPONENT_NONE;
   bits.YCbCr422 = IDDCX_BITS_PER_COMPONENT_NONE;
   bits.YCbCr420 = IDDCX_BITS_PER_COMPONENT_NONE;
@@ -177,27 +179,50 @@ void CIndirectDeviceContext::InitAdapter()
 
   m_adapter = initOut.AdapterObject;
 
-  // try to co-exist with the virtual video device by telling IddCx which adapter we prefer to render on
+  // Try to co-exist with the virtual video device by telling IddCx which
+  // hardware adapter we prefer to render on. Optional registry override:
+  // HKLM\SOFTWARE\LookingGlass\IDD\RenderAdapter = substring of DXGI name.
   IDXGIFactory * factory = NULL;
   IDXGIAdapter * dxgiAdapter;
-  CreateDXGIFactory(__uuidof(IDXGIFactory), (void **)&factory);
-  for (UINT i = 0; factory->EnumAdapters(i, &dxgiAdapter) != DXGI_ERROR_NOT_FOUND; ++i)
+  const std::wstring preferredAdapter =
+    g_settings.ReadStringValue(L"RenderAdapter", L"");
+  if (SUCCEEDED(CreateDXGIFactory(__uuidof(IDXGIFactory), (void **)&factory)))
   {
-    DXGI_ADAPTER_DESC adapterDesc;
-    dxgiAdapter->GetDesc(&adapterDesc);
-    dxgiAdapter->Release();
+    for (UINT i = 0; factory->EnumAdapters(i, &dxgiAdapter) != DXGI_ERROR_NOT_FOUND; ++i)
+    {
+      DXGI_ADAPTER_DESC adapterDesc;
+      dxgiAdapter->GetDesc(&adapterDesc);
+      dxgiAdapter->Release();
 
-    if ((adapterDesc.VendorId == 0x1414 && adapterDesc.DeviceId == 0x008c) || // Microsoft Basic Render Driver
-        (adapterDesc.VendorId == 0x1b36 && adapterDesc.DeviceId == 0x000d) || // QXL      
-        (adapterDesc.VendorId == 0x1234 && adapterDesc.DeviceId == 0x1111))   // QEMU Standard VGA
-      continue;
+      const bool blocked =
+        (adapterDesc.VendorId == 0x1414 && adapterDesc.DeviceId == 0x008c) || // Microsoft Basic Render Driver
+        (adapterDesc.VendorId == 0x1b36 && adapterDesc.DeviceId == 0x000d) || // QXL
+        (adapterDesc.VendorId == 0x1234 && adapterDesc.DeviceId == 0x1111);   // QEMU Standard VGA
+      const bool preferredMismatch =
+        !preferredAdapter.empty() &&
+        wcsstr(adapterDesc.Description, preferredAdapter.c_str()) == nullptr;
 
-    IDARG_IN_ADAPTERSETRENDERADAPTER args = {};
-    args.PreferredRenderAdapter = adapterDesc.AdapterLuid;
-    IddCxAdapterSetRenderAdapter(m_adapter, &args);
-    break;
+      DEBUG_INFO(L"IDD render adapter[%u]: %s vendor=0x%04x device=0x%04x%s%s",
+        i,
+        adapterDesc.Description,
+        adapterDesc.VendorId,
+        adapterDesc.DeviceId,
+        blocked ? L" blocked" : L"",
+        preferredMismatch ? L" preferred-mismatch" : L"");
+
+      if (blocked || preferredMismatch)
+        continue;
+
+      IDARG_IN_ADAPTERSETRENDERADAPTER args = {};
+      args.PreferredRenderAdapter = adapterDesc.AdapterLuid;
+      IddCxAdapterSetRenderAdapter(m_adapter, &args);
+      DEBUG_INFO(L"IDD selected render adapter: %s", adapterDesc.Description);
+      break;
+    }
+    factory->Release();
   }
-  factory->Release();
+  else
+    DEBUG_WARN("CreateDXGIFactory failed while selecting IDD render adapter");
 
   auto * wrapper = WdfObjectGet_CIndirectDeviceContextWrapper(m_adapter);
   wrapper->context = this;  
@@ -749,12 +774,29 @@ void CIndirectDeviceContext::DeInitLGMP()
 
 void CIndirectDeviceContext::LGMPTimer()
 {
+  ProcessLGMP(true);
+}
+
+void CIndirectDeviceContext::ProcessLGMP(bool allowReplug)
+{
+  if (!m_lgmp)
+    return;
+
   if (InterlockedExchange(&m_replugMonitorQueued, 0))
   {
+    if (!allowReplug)
+    {
+      InterlockedExchange(&m_replugMonitorQueued, 1);
+      return;
+    }
+
     m_doSetMode = true;
     ReplugMonitor();
     return;
   }
+
+  if (InterlockedCompareExchange(&m_lgmpProcessActive, 1, 0) != 0)
+    return;
 
   LGMP_STATUS status;
   if ((status = lgmpHostProcess(m_lgmp)) != LGMP_OK)
@@ -763,11 +805,13 @@ void CIndirectDeviceContext::LGMPTimer()
     {
       DEBUG_WARN("LGMP reported the shared memory has been corrupted, attempting to recover\n");
       //TODO: fixme - reinit
+      InterlockedExchange(&m_lgmpProcessActive, 0);
       return;
     }
 
     DEBUG_ERROR("lgmpHostProcess Failed: %s", lgmpStatusString(status));
     //TODO: fixme - shutdown
+    InterlockedExchange(&m_lgmpProcessActive, 0);
     return;
   }
 
@@ -803,6 +847,8 @@ void CIndirectDeviceContext::LGMPTimer()
 
   if (lgmpHostQueueNewSubs(m_pointerQueue))
     ResendCursor();
+
+  InterlockedExchange(&m_lgmpProcessActive, 0);
 }
 
 CIndirectDeviceContext::PreparedFrameBuffer CIndirectDeviceContext::PrepareFrameBuffer(
@@ -813,6 +859,8 @@ CIndirectDeviceContext::PreparedFrameBuffer CIndirectDeviceContext::PrepareFrame
 
   if (!m_lgmp || !m_frameQueue)
     return result;
+
+  ProcessLGMP(false);
 
   if (InterlockedCompareExchange(&m_recoverModeUpdateSwapChain, 0, 0) &&
       srcFormat.width == m_setMode.width && srcFormat.height == m_setMode.height)
@@ -837,9 +885,22 @@ CIndirectDeviceContext::PreparedFrameBuffer CIndirectDeviceContext::PrepareFrame
 
   KVMFRFrame * fi = m_frame[m_frameIndex];
 
-  // wait until there is room in the queue
+  // If the client falls behind, do not wedge the IDD swapchain thread forever.
+  // Keep processing LGMP briefly in case the queue can be drained, then drop this
+  // frame and let IddCx continue. The next frame will carry fresh damage.
+  unsigned queueWaits = 0;
   while (lgmpHostQueuePending(m_frameQueue) == LGMP_Q_FRAME_LEN)
+  {
+    ProcessLGMP(false);
+    if (++queueWaits >= 32)
+    {
+      const LONG drops = InterlockedIncrement(&m_frameDropCount);
+      if (drops == 1 || (drops % 300) == 0)
+        DEBUG_WARN("LGMP frame queue full, dropping frame (drops=%ld)", drops);
+      return result;
+    }
     Sleep(0);
+  }
 
   if (dstFormat.format == FRAME_TYPE_INVALID)
   {
@@ -889,7 +950,20 @@ CIndirectDeviceContext::PreparedFrameBuffer CIndirectDeviceContext::PrepareFrame
   FrameBuffer* fb = m_frameBuffer[m_frameIndex];
   fb->wp = 0;
 
-  lgmpHostQueuePost(m_frameQueue, 0, m_frameMemory[m_frameIndex]);
+  LGMP_STATUS status = lgmpHostQueuePost(m_frameQueue, 0, m_frameMemory[m_frameIndex]);
+  if (status != LGMP_OK)
+  {
+    const LONG drops = InterlockedIncrement(&m_frameDropCount);
+    if (status == LGMP_ERR_QUEUE_FULL)
+    {
+      if (drops == 1 || (drops % 300) == 0)
+        DEBUG_WARN("LGMP frame queue full on post, dropping frame (drops=%ld)", drops);
+    }
+    else
+      DEBUG_ERROR("lgmpHostQueuePost Failed (Frame): %s", lgmpStatusString(status));
+    return result;
+  }
+  ProcessLGMP(false);
 
   result.frameIndex = m_frameIndex;
   result.mem        = fb->data;
@@ -932,6 +1006,9 @@ void CIndirectDeviceContext::PresentHeliosFrame(unsigned frameIndex)
 
 void CIndirectDeviceContext::SendCursor(const IDARG_OUT_QUERY_HWCURSOR& info, const BYTE * data)
 {
+  if (!m_lgmp || !m_pointerQueue)
+    return;
+
   PLGMPMemory mem;
   if (info.CursorShapeInfo.CursorType == IDDCX_CURSOR_SHAPE_TYPE_UNINITIALIZED)
   {

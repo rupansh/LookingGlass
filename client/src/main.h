@@ -209,6 +209,7 @@ struct AppParams
 
   unsigned int         cursorPollInterval;
   unsigned int         framePollInterval;
+  bool                 useLGMP;
   bool                 allowDMA;
 
   bool                 forceRenderer;

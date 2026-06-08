@@ -63,6 +63,7 @@ private:
   PLGMPHost      m_lgmp       = nullptr;
   WDFTIMER       m_lgmpTimer  = nullptr;
   PLGMPHostQueue m_frameQueue = nullptr;
+  volatile LONG  m_lgmpProcessActive = 0;
 
   PLGMPHostQueue m_pointerQueue = nullptr;
   PLGMPMemory    m_pointerMemory     [LGMP_Q_POINTER_LEN   ] = {};
@@ -81,6 +82,7 @@ private:
   PLGMPMemory    m_frameMemory[LGMP_Q_FRAME_LEN] = {};
   KVMFRFrame   * m_frame      [LGMP_Q_FRAME_LEN] = {};
   FrameBuffer  * m_frameBuffer[LGMP_Q_FRAME_LEN] = {};
+  volatile LONG  m_frameDropCount = 0;
 
   unsigned    m_width    = 0;
   unsigned    m_height   = 0;
@@ -97,6 +99,7 @@ private:
 
   void DeInitLGMP();
   void LGMPTimer();
+  void ProcessLGMP(bool allowReplug);
   void ResendCursor() const;
   bool UpdateMonitorModes();
 

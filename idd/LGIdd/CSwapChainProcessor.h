@@ -59,6 +59,7 @@ private:
 
   RECT     m_dirtyRects[LG_MAX_DIRTY_RECTS] = {};
   unsigned m_nbDirtyRects = 0;
+  LONG     m_copyBusyDrops = 0;
 
   static DWORD CALLBACK _SwapChainThread(LPVOID arg);
   void SwapChainThread();

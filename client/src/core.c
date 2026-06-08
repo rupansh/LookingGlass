@@ -580,10 +580,11 @@ void core_handleMouseNormal(double ex, double ey)
 
           if (--timeout == 0)
           {
-            DEBUG_ERROR(
+            DEBUG_WARN(
                 "pointerQueue serial not updating, expected %u but stuck at %u",
                 setPosSerial, hostSerial);
-            break;
+            g_cursor.realigning = false;
+            goto fallback;
           }
 
           g_state.ds->wait(1);

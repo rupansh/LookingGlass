@@ -98,6 +98,13 @@ static struct Option options[] =
   },
   {
     .module        = "app",
+    .name          = "lgmp",
+    .description   = "Use the Looking Glass shared-memory LGMP frame transport",
+    .type          = OPTION_TYPE_BOOL,
+    .value.x_bool  = true
+  },
+  {
+    .module        = "app",
     .name          = "allowDMA",
     .description   = "Allow direct DMA transfers if supported (see `README.md` in the `module` dir)",
     .type          = OPTION_TYPE_BOOL,
@@ -675,6 +682,7 @@ bool config_load(int argc, char * argv[])
   // setup the application params for the basic types
   g_params.cursorPollInterval   = option_get_int   ("app"  , "cursorPollInterval");
   g_params.framePollInterval    = option_get_int   ("app"  , "framePollInterval" );
+  g_params.useLGMP              = option_get_bool  ("app"  , "lgmp"              );
   g_params.allowDMA             = option_get_bool  ("app"  , "allowDMA"          );
 
   g_params.windowTitle            = option_get_string("win", "title"             );
@@ -769,6 +777,13 @@ bool config_load(int argc, char * argv[])
     g_params.alwaysShowCursor = option_get_bool("spice", "alwaysShowCursor");
     g_params.showCursorDot    = option_get_bool("spice", "showCursorDot");
     g_params.largeCursorDot   = option_get_bool("spice", "largeCursorDot");
+  }
+
+  if (!g_params.useLGMP)
+  {
+    g_params.useSpice = true;
+    g_params.useSpiceDisplay = true;
+    g_params.useSpiceInput = true;
   }
 
   g_params.audioPeriodSize = option_get_int("audio", "periodSize");

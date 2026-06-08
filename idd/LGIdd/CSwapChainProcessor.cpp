@@ -404,10 +404,12 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
   unsigned frameDirtyRectCount = nbDirtyRects;
   m_postProcessor.AdjustFrameDamage(frameDirtyRects, &frameDirtyRectCount);
 
-  auto copyQueue = m_dx12Device->GetCopyQueue();
+  auto copyQueue = m_dx12Device->TryGetCopyQueue();
   if (!copyQueue)
   {
-    DEBUG_ERROR("Failed to get a CopyQueue");
+    const LONG drops = InterlockedIncrement(&m_copyBusyDrops);
+    if (drops == 1 || (drops % 300) == 0)
+      DEBUG_WARN("D3D12 copy queues busy, dropping frame (drops=%ld)", drops);
     return false;
   }
 

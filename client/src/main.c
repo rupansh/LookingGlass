@@ -1251,7 +1251,7 @@ static int lg_run(void)
   signal(SIGTERM, intHandler);
 
   // try map the shared memory
-  if (!ivshmemOpen(&g_state.shm))
+  if (g_params.useLGMP && !ivshmemOpen(&g_state.shm))
   {
     DEBUG_ERROR("Failed to map memory");
     return -1;
@@ -1340,6 +1340,7 @@ static int lg_run(void)
   }
 
   g_state.useDMA =
+    g_params.useLGMP &&
     g_params.allowDMA &&
     ivshmemHasDMA(&g_state.shm);
 
@@ -1418,6 +1419,23 @@ static int lg_run(void)
   g_state.cbAvailable = g_state.ds->cbInit && g_state.ds->cbInit();
   if (g_state.cbAvailable)
     g_state.cbRequestList = ll_new();
+
+  if (!g_params.useLGMP)
+  {
+    DEBUG_INFO("Using SPICE display without LGMP shared-memory transport");
+    app_useSpiceDisplay(true);
+    g_state.guestOS = KVMFR_OS_WINDOWS;
+    if (g_state.spiceReady && g_params.useSpiceInput)
+      keybind_spiceRegister();
+
+    while(likely(g_state.state == APP_STATE_RUNNING))
+    {
+      lgMessage_process();
+      g_state.ds->wait(100);
+    }
+
+    return 0;
+  }
 
   LGMP_STATUS status;
 

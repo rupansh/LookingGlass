@@ -215,6 +215,24 @@ CD3D12CommandQueue * CD3D12Device::GetCopyQueue()
   return nullptr;
 }
 
+CD3D12CommandQueue * CD3D12Device::TryGetCopyQueue()
+{
+  for (int i = 0; i < ARRAYSIZE(m_copyQueue); ++i)
+  {
+    auto& queue = m_copyQueue[m_copyQueueIndex++];
+    if (m_copyQueueIndex == ARRAYSIZE(m_copyQueue))
+      m_copyQueueIndex = 0;
+
+    if (queue.IsReady())
+    {
+      queue.Reset();
+      return &queue;
+    }
+  }
+
+  return nullptr;
+}
+
 CD3D12CommandQueue * CD3D12Device::GetComputeQueue()
 {
   for (int c = 0; c < 100; ++c)
