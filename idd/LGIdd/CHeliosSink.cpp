@@ -171,9 +171,10 @@ bool CHeliosSink::InitVulkan()
   VkInstanceCreateInfo ici = {};
   ici.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
   ici.pApplicationInfo = &app;
-  if (pCreateInstance(&ici, NULL, &m_inst) != VK_SUCCESS)
+  VkResult result = pCreateInstance(&ici, NULL, &m_inst);
+  if (result != VK_SUCCESS)
   {
-    DEBUG_ERROR("Helios: vkCreateInstance failed");
+    DEBUG_ERROR("Helios: vkCreateInstance failed: %d", result);
     return false;
   }
 
